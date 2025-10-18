@@ -1,0 +1,294 @@
+import React, { useEffect, useRef, useState } from 'react';
+import * as THREE from 'three';
+
+export default function AngularMomentumViz() {
+  const containerRef = useRef(null);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [speed, setSpeed] = useState(1);
+  const [orbitRadius, setOrbitRadius] = useState(3);
+  const [showComponents, setShowComponents] = useState(false);
+  const [angularMomentum, setAngularMomentum] = useState({ x: 0, y: 0, z: 0, magnitude: 0 });
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    // Scene setup
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0a1a);
+    
+    const camera = new THREE.PerspectiveCamera(75, containerRef.current.clientWidth / containerRef.current.clientHeight, 0.1, 1000);
+    camera.position.set(8, 8, 8);
+    camera.lookAt(0, 0, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
+    containerRef.current.appendChild(renderer.domElement);
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+    const pointLight = new THREE.PointLight(0xffffff, 1);
+    pointLight.position.set(10, 10, 10);
+    scene.add(pointLight);
+
+    // Grid
+    const gridHelper = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
+    scene.add(gridHelper);
+
+    // Particle
+    const particleGeometry = new THREE.SphereGeometry(0.2, 32, 32);
+    const particleMaterial = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.5 });
+    const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+    scene.add(particle);
+
+    // Orbital path
+    const pathGeometry = new THREE.BufferGeometry();
+    const pathPoints = [];
+    for (let i = 0; i <= 64; i++) {
+      const angle = (i / 64) * Math.PI * 2;
+      pathPoints.push(new THREE.Vector3(
+        orbitRadius * Math.cos(angle),
+        0,
+        orbitRadius * Math.sin(angle)
+      ));
+    }
+    pathGeometry.setFromPoints(pathPoints);
+    const pathMaterial = new THREE.LineBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.5 });
+    const pathLine = new THREE.Line(pathGeometry, pathMaterial);
+    scene.add(pathLine);
+
+    // Vector arrows
+    const positionArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 0), 1, 0xff0000, 0.3, 0.2);
+    const momentumArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 0), 1, 0x00ff00, 0.3, 0.2);
+    const angularMomentumArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0), 1, 0xffff00, 0.4, 0.3);
+    scene.add(positionArrow);
+    scene.add(momentumArrow);
+    scene.add(angularMomentumArrow);
+
+    // Component arrows
+    const componentArrows = {
+      x: new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 0), 1, 0xff6600, 0.2, 0.15),
+      y: new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0), 1, 0xff00ff, 0.2, 0.15),
+      z: new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 0), 1, 0x00ffff, 0.2, 0.15)
+    };
+    
+    if (showComponents) {
+      scene.add(componentArrows.x);
+      scene.add(componentArrows.y);
+      scene.add(componentArrows.z);
+    }
+
+    // Animation
+    let time = 0;
+    let animationId;
+
+    const animate = () => {
+      animationId = requestAnimationFrame(animate);
+
+      if (isPlaying) {
+        time += 0.01 * speed;
+      }
+
+      // Update particle position
+      const x = orbitRadius * Math.cos(time);
+      const y = 0;
+      const z = orbitRadius * Math.sin(time);
+      particle.position.set(x, y, z);
+
+      // Calculate velocity (momentum direction, assuming unit mass)
+      const vx = -orbitRadius * Math.sin(time) * speed * 0.01;
+      const vy = 0;
+      const vz = orbitRadius * Math.cos(time) * speed * 0.01;
+
+      // Normalize and scale for visualization
+      const velocityMag = Math.sqrt(vx * vx + vy * vy + vz * vz);
+      const momentumScale = 2;
+      const px = (vx / velocityMag) * momentumScale;
+      const py = (vy / velocityMag) * momentumScale;
+      const pz = (vz / velocityMag) * momentumScale;
+
+      // Calculate angular momentum L = r × p
+      const Lx = y * pz - z * py;
+      const Ly = z * px - x * pz;
+      const Lz = x * py - y * px;
+      const Lmag = Math.sqrt(Lx * Lx + Ly * Ly + Lz * Lz);
+
+      // Update angular momentum state
+      setAngularMomentum({ x: Lx, y: Ly, z: Lz, magnitude: Lmag });
+
+      // Update position arrow
+      positionArrow.position.set(0, 0, 0);
+      positionArrow.setDirection(new THREE.Vector3(x, y, z).normalize());
+      positionArrow.setLength(Math.sqrt(x * x + y * y + z * z));
+
+      // Update momentum arrow
+      momentumArrow.position.set(x, y, z);
+      momentumArrow.setDirection(new THREE.Vector3(px, py, pz).normalize());
+      momentumArrow.setLength(momentumScale);
+
+      // Update angular momentum arrow
+      angularMomentumArrow.position.set(0, 0, 0);
+      if (Lmag > 0.001) {
+        angularMomentumArrow.setDirection(new THREE.Vector3(Lx, Ly, Lz).normalize());
+        angularMomentumArrow.setLength(Lmag * 0.5);
+      }
+
+      // Update component arrows
+      if (showComponents) {
+        if (Math.abs(Lx) > 0.001) {
+          componentArrows.x.setDirection(new THREE.Vector3(Math.sign(Lx), 0, 0));
+          componentArrows.x.setLength(Math.abs(Lx) * 0.5);
+          componentArrows.x.visible = true;
+        } else {
+          componentArrows.x.visible = false;
+        }
+
+        if (Math.abs(Ly) > 0.001) {
+          componentArrows.y.setDirection(new THREE.Vector3(0, Math.sign(Ly), 0));
+          componentArrows.y.setLength(Math.abs(Ly) * 0.5);
+          componentArrows.y.visible = true;
+        } else {
+          componentArrows.y.visible = false;
+        }
+
+        if (Math.abs(Lz) > 0.001) {
+          componentArrows.z.setDirection(new THREE.Vector3(0, 0, Math.sign(Lz)));
+          componentArrows.z.setLength(Math.abs(Lz) * 0.5);
+          componentArrows.z.visible = true;
+        } else {
+          componentArrows.z.visible = false;
+        }
+      }
+
+      // Rotate camera slowly
+      const cameraAngle = time * 0.1;
+      camera.position.x = 8 * Math.cos(cameraAngle);
+      camera.position.z = 8 * Math.sin(cameraAngle);
+      camera.lookAt(0, 0, 0);
+
+      renderer.render(scene, camera);
+    };
+
+    animate();
+
+    // Handle window resize
+    const handleResize = () => {
+      if (!containerRef.current) return;
+      camera.aspect = containerRef.current.clientWidth / containerRef.current.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
+    };
+    window.addEventListener('resize', handleResize);
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      cancelAnimationFrame(animationId);
+      containerRef.current?.removeChild(renderer.domElement);
+    };
+  }, [isPlaying, speed, orbitRadius, showComponents]);
+
+  return (
+    <div className="w-full h-screen bg-gray-900 text-white flex flex-col">
+      <div className="p-4 bg-gray-800 border-b border-gray-700">
+        <h1 className="text-2xl font-bold mb-4">Angular Momentum Visualization</h1>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+          <div>
+            <label className="block text-sm mb-2">Speed: {speed.toFixed(1)}x</label>
+            <input
+              type="range"
+              min="0.1"
+              max="3"
+              step="0.1"
+              value={speed}
+              onChange={(e) => setSpeed(parseFloat(e.target.value))}
+              className="w-full"
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm mb-2">Orbit Radius: {orbitRadius.toFixed(1)}</label>
+            <input
+              type="range"
+              min="1"
+              max="5"
+              step="0.1"
+              value={orbitRadius}
+              onChange={(e) => setOrbitRadius(parseFloat(e.target.value))}
+              className="w-full"
+            />
+          </div>
+
+          <div className="flex items-end">
+            <button
+              onClick={() => setIsPlaying(!isPlaying)}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded transition"
+            >
+              {isPlaying ? 'Pause' : 'Play'}
+            </button>
+          </div>
+
+          <div className="flex items-center">
+            <label className="flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showComponents}
+                onChange={(e) => setShowComponents(e.target.checked)}
+                className="mr-2"
+              />
+              <span className="text-sm">Show L Components</span>
+            </label>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+          <div className="bg-gray-700 p-2 rounded">
+            <div className="flex items-center mb-1">
+              <div className="w-3 h-3 bg-red-500 mr-2 rounded"></div>
+              <span className="font-semibold">Position (r)</span>
+            </div>
+          </div>
+          <div className="bg-gray-700 p-2 rounded">
+            <div className="flex items-center mb-1">
+              <div className="w-3 h-3 bg-green-500 mr-2 rounded"></div>
+              <span className="font-semibold">Momentum (p)</span>
+            </div>
+          </div>
+          <div className="bg-gray-700 p-2 rounded">
+            <div className="flex items-center mb-1">
+              <div className="w-3 h-3 bg-yellow-500 mr-2 rounded"></div>
+              <span className="font-semibold">Angular Mom. (L)</span>
+            </div>
+          </div>
+          <div className="bg-gray-700 p-2 rounded">
+            <div className="font-semibold mb-1">|L| = {angularMomentum.magnitude.toFixed(2)}</div>
+          </div>
+        </div>
+
+        {showComponents && (
+          <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
+            <div className="bg-gray-700 p-2 rounded">
+              <span className="text-orange-400 font-semibold">L_x:</span> {angularMomentum.x.toFixed(2)}
+            </div>
+            <div className="bg-gray-700 p-2 rounded">
+              <span className="text-pink-400 font-semibold">L_y:</span> {angularMomentum.y.toFixed(2)}
+            </div>
+            <div className="bg-gray-700 p-2 rounded">
+              <span className="text-cyan-400 font-semibold">L_z:</span> {angularMomentum.z.toFixed(2)}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div ref={containerRef} className="flex-1" />
+
+      <div className="p-3 bg-gray-800 border-t border-gray-700 text-xs">
+        <div className="max-w-4xl">
+          <p className="mb-1"><strong>Angular Momentum:</strong> <strong>L</strong> = <strong>r</strong> × <strong>p</strong></p>
+          <p>L_x = yp_z - zp_y | L_y = zp_x - xp_z | L_z = xp_y - yp_x</p>
+        </div>
+      </div>
+    </div>
+  );
+}
